@@ -998,21 +998,20 @@ impl Vim {
             Mode::Normal => {
                 if let Some(operator) = self.operator_stack.last() {
                     match operator {
-                        // Navigation operators -> Block cursor
+                        // Navigation operators -> Normal mode cursor
                         Operator::FindForward { .. }
                         | Operator::FindBackward { .. }
                         | Operator::Mark
                         | Operator::Jump { .. }
                         | Operator::Register
                         | Operator::RecordRegister
-                        | Operator::ReplayRegister => CursorShape::Block,
-
+                        | Operator::ReplayRegister => VimSettings::get_global(cx).cursor_shape,
                         // All other operators -> Underline cursor
                         _ => CursorShape::Underline,
                     }
                 } else {
-                    // No operator active -> Block cursor
-                    CursorShape::Block
+                    // No operator active -> Normal mode cursor
+                    VimSettings::get_global(cx).cursor_shape
                 }
             }
             Mode::Replace => CursorShape::Underline,
@@ -1672,6 +1671,7 @@ struct VimSettings {
     pub use_smartcase_find: bool,
     pub custom_digraphs: HashMap<String, Arc<str>>,
     pub highlight_on_yank_duration: u64,
+    pub cursor_shape: CursorShape,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1683,6 +1683,7 @@ struct VimSettingsContent {
     pub use_smartcase_find: Option<bool>,
     pub custom_digraphs: Option<HashMap<String, Arc<str>>>,
     pub highlight_on_yank_duration: Option<u64>,
+    pub cursor_shape: Option<CursorShape>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1741,6 +1742,7 @@ impl Settings for VimSettings {
             highlight_on_yank_duration: settings
                 .highlight_on_yank_duration
                 .ok_or_else(Self::missing_default)?,
+            cursor_shape: settings.cursor_shape.ok_or_else(Self::missing_default)?,
         })
     }
 }
