@@ -65,6 +65,16 @@ pub struct WithCount {
     action: WrappedAction,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WriteAndNext {
+    save_intent: SaveIntent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WriteAndPrevious {
+    save_intent: SaveIntent,
+}
+
 #[derive(Clone, Deserialize, JsonSchema, PartialEq)]
 pub enum VimOption {
     Wrap(bool),
@@ -168,6 +178,8 @@ impl_internal_actions!(
         OnMatchingLines,
         ShellExec,
         VimSet,
+        WriteAndNext,
+        WriteAndPrevious,
     ]
 );
 
@@ -353,7 +365,41 @@ pub fn register(editor: &mut Editor, cx: &mut Context<Vim>) {
 
     Vim::action(editor, cx, |vim, action: &ShellExec, window, cx| {
         action.run(vim, window, cx)
-    })
+    });
+
+    Vim::action(editor, cx, |vim, action: &WriteAndNext, window, cx| {
+        if let Some(workspace) = vim.workspace(window) {
+            window.dispatch_action(
+                workspace::Save {
+                    save_intent: Some(action.save_intent),
+                }
+                .boxed_clone(),
+                cx,
+            );
+            workspace.update(cx, |workspace, cx| {
+                workspace.active_pane().update(cx, |pane, cx| {
+                    pane.activate_next_item(true, window, cx);
+                });
+            });
+        }
+    });
+
+    Vim::action(editor, cx, |vim, action: &WriteAndPrevious, window, cx| {
+        if let Some(workspace) = vim.workspace(window) {
+            window.dispatch_action(
+                workspace::Save {
+                    save_intent: Some(action.save_intent),
+                }
+                .boxed_clone(),
+                cx,
+            );
+            workspace.update(cx, |workspace, cx| {
+                workspace.active_pane().update(cx, |pane, cx| {
+                    pane.activate_prev_item(true, window, cx);
+                });
+            });
+        }
+    });
 }
 
 #[derive(Default)]
@@ -774,6 +820,24 @@ fn generate_commands(_: &App) -> Vec<VimCommand> {
         )
         .bang(workspace::CloseAllItemsAndPanes {
             save_intent: Some(SaveIntent::Overwrite),
+        }),
+        VimCommand::new(
+            ("wn", "ext"),
+            WriteAndNext {
+                save_intent: SaveIntent::Save,
+            },
+        )
+        .bang(WriteAndNext {
+            save_intent: SaveIntent::Overwrite,
+        }),
+        VimCommand::new(
+            ("wN", "ext"),
+            WriteAndPrevious {
+                save_intent: SaveIntent::Save,
+            },
+        )
+        .bang(WriteAndPrevious {
+            save_intent: SaveIntent::Overwrite,
         }),
         VimCommand::new(("cq", "uit"), zed_actions::Quit),
         VimCommand::new(("sp", "lit"), workspace::SplitHorizontal),
