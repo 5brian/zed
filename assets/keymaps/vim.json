@@ -586,6 +586,14 @@
     }
   },
   {
+    "context": "BufferSearchBar || ProjectSearchBar",
+    "bindings": {
+      "ctrl-6": "pane::AlternateFile",
+      "ctrl-o": "pane::GoBack",
+      "ctrl-i": "pane::GoForward"
+    }
+  },
+  {
     "context": "BufferSearchBar && !in_replace",
     "bindings": {
       "enter": "vim::SearchSubmit",
