@@ -65,6 +65,12 @@ pub struct WithCount {
     action: WrappedAction,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithChain {
+    first: WrappedAction,
+    second: WrappedAction,
+}
+
 #[derive(Clone, Deserialize, JsonSchema, PartialEq)]
 pub enum VimOption {
     Wrap(bool),
@@ -165,6 +171,7 @@ impl_internal_actions!(
         YankCommand,
         WithRange,
         WithCount,
+        WithChain,
         OnMatchingLines,
         ShellExec,
         VimSet,
@@ -348,6 +355,14 @@ pub fn register(editor: &mut Editor, cx: &mut Context<Vim>) {
         });
     });
 
+    Vim::action(editor, cx, |_, action: &WithChain, window, cx| {
+        let second_action = action.second.boxed_clone();
+        window.dispatch_action(action.first.boxed_clone(), cx);
+        cx.defer_in(window, move |_, window, cx| {
+            window.dispatch_action(second_action, cx);
+        });
+    });
+
     Vim::action(editor, cx, |vim, action: &OnMatchingLines, window, cx| {
         action.run(vim, window, cx)
     });
@@ -364,6 +379,7 @@ struct VimCommand {
     action: Option<Box<dyn Action>>,
     action_name: Option<&'static str>,
     bang_action: Option<Box<dyn Action>>,
+    chain_action: Option<Box<dyn Action>>,
     range: Option<
         Box<
             dyn Fn(Box<dyn Action>, &CommandRange) -> Option<Box<dyn Action>>
@@ -400,6 +416,11 @@ impl VimCommand {
         self
     }
 
+    fn chain(mut self, next_action: impl Action) -> Self {
+        self.chain_action = Some(next_action.boxed_clone());
+        self
+    }
+
     fn range(
         mut self,
         f: impl Fn(Box<dyn Action>, &CommandRange) -> Option<Box<dyn Action>> + Send + Sync + 'static,
@@ -429,7 +450,7 @@ impl VimCommand {
             return None;
         }
 
-        let action = if has_bang && self.bang_action.is_some() {
+        let mut action = if has_bang && self.bang_action.is_some() {
             self.bang_action.as_ref().unwrap().boxed_clone()
         } else if let Some(action) = self.action.as_ref() {
             action.boxed_clone()
@@ -438,6 +459,14 @@ impl VimCommand {
         } else {
             return None;
         };
+
+        if let Some(chain_action) = self.chain_action.as_ref() {
+            let chained = WithChain {
+                first: WrappedAction(action),
+                second: WrappedAction(chain_action.boxed_clone()),
+            };
+            action = chained.boxed_clone();
+        }
 
         if let Some(range) = range {
             self.range.as_ref().and_then(|f| f(action, range))
@@ -776,9 +805,49 @@ fn generate_commands(_: &App) -> Vec<VimCommand> {
         .bang(workspace::CloseAllItemsAndPanes {
             save_intent: Some(SaveIntent::Overwrite),
         }),
+        VimCommand::new(
+            ("wn", "ext"),
+            workspace::Save {
+                save_intent: Some(SaveIntent::Save),
+            },
+        )
+        .bang(workspace::Save {
+            save_intent: Some(SaveIntent::Overwrite),
+        })
+        .chain(workspace::ActivateNextItem),
+        VimCommand::new(
+            ("wN", "ext"),
+            workspace::Save {
+                save_intent: Some(SaveIntent::Save),
+            },
+        )
+        .bang(workspace::Save {
+            save_intent: Some(SaveIntent::Overwrite),
+        })
+        .chain(workspace::ActivatePreviousItem),
+        VimCommand::new(
+            ("wp", "revious"),
+            workspace::Save {
+                save_intent: Some(SaveIntent::Save),
+            },
+        )
+        .bang(workspace::Save {
+            save_intent: Some(SaveIntent::Overwrite),
+        })
+        .chain(workspace::ActivatePreviousItem),
         VimCommand::new(("cq", "uit"), zed_actions::Quit),
         VimCommand::new(("sp", "lit"), workspace::SplitHorizontal),
         VimCommand::new(("vs", "plit"), workspace::SplitVertical),
+        VimCommand::new(("sbn", "ext"), workspace::SplitHorizontal)
+            .chain(workspace::ActivateNextItem),
+        VimCommand::new(("sbN", "ext"), workspace::SplitHorizontal)
+            .chain(workspace::ActivatePreviousItem),
+        VimCommand::new(("sbp", "revious"), workspace::SplitHorizontal)
+            .chain(workspace::ActivatePreviousItem),
+        VimCommand::new(("sbf", "irst"), workspace::SplitHorizontal)
+            .chain(workspace::ActivateItem(0)),
+        VimCommand::new(("sbl", "ast"), workspace::SplitHorizontal)
+            .chain(workspace::ActivateLastItem),
         VimCommand::new(
             ("bd", "elete"),
             workspace::CloseActiveItem {
