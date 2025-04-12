@@ -8297,6 +8297,7 @@ impl Editor {
         }
         self.hide_mouse_cursor(&HideMouseCursorOrigin::TypingAction);
         let mut selections = self.selections.all::<Point>(cx);
+        let original_positions = selections.clone();
         let mut prev_edited_row = 0;
         let mut row_delta = 0;
         let mut edits = Vec::new();
@@ -8315,7 +8316,7 @@ impl Editor {
         self.transact(window, cx, |this, window, cx| {
             this.buffer.update(cx, |b, cx| b.edit(edits, None, cx));
             this.change_selections(Some(Autoscroll::fit()), window, cx, |s| {
-                s.select(selections)
+                s.select(original_positions)
             });
         });
     }
@@ -8403,6 +8404,7 @@ impl Editor {
         self.hide_mouse_cursor(&HideMouseCursorOrigin::TypingAction);
         let display_map = self.display_map.update(cx, |map, cx| map.snapshot(cx));
         let selections = self.selections.all::<Point>(cx);
+        let original_positions = selections.clone();
         let mut deletion_ranges = Vec::new();
         let mut last_outdent = None;
         {
@@ -8465,7 +8467,7 @@ impl Editor {
             });
             let selections = this.selections.all::<usize>(cx);
             this.change_selections(Some(Autoscroll::fit()), window, cx, |s| {
-                s.select(selections)
+                s.select(original_positions)
             });
         });
     }
