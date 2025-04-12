@@ -483,8 +483,32 @@ impl Vim {
         }
     }
 
+    // Trim the \n if it is the last character when on a visual line multiline selection
+    fn adjust_visual_line_end(
+        &mut self,
+        editor: &mut Editor,
+        window: &mut Window,
+        cx: &mut Context<Editor>,
+    ) {
+        if editor.selections.line_mode {
+            editor.change_selections(None, window, cx, |s| {
+                s.move_with(|map, selection| {
+                    let start = selection.start.to_point(map);
+                    let end = selection.end.to_point(map);
+                    if end.column == 0 && end > start {
+                        let row = end.row.saturating_sub(1);
+                        selection.end =
+                            Point::new(row, map.buffer_snapshot.line_len(MultiBufferRow(row)))
+                                .to_display_point(map);
+                    }
+                });
+            });
+        }
+    }
+
     pub fn other_end(&mut self, _: &OtherEnd, window: &mut Window, cx: &mut Context<Self>) {
-        self.update_editor(window, cx, |_, editor, window, cx| {
+        self.update_editor(window, cx, |vim, editor, window, cx| {
+            vim.adjust_visual_line_end(editor, window, cx);
             editor.change_selections(Some(Autoscroll::fit()), window, cx, |s| {
                 s.move_with(|_, selection| {
                     selection.reversed = !selection.reversed;
@@ -500,7 +524,8 @@ impl Vim {
         cx: &mut Context<Self>,
     ) {
         let mode = self.mode;
-        self.update_editor(window, cx, |_, editor, window, cx| {
+        self.update_editor(window, cx, |vim, editor, window, cx| {
+            vim.adjust_visual_line_end(editor, window, cx);
             editor.change_selections(Some(Autoscroll::fit()), window, cx, |s| {
                 s.move_with(|_, selection| {
                     selection.reversed = !selection.reversed;
@@ -600,29 +625,13 @@ impl Vim {
         self.store_visual_marks(window, cx);
         self.update_editor(window, cx, |vim, editor, window, cx| {
             let line_mode = line_mode || editor.selections.line_mode;
-
-            // For visual line mode, adjust selections to avoid yanking the next line when on \n
-            if line_mode && vim.mode != Mode::VisualBlock {
-                editor.change_selections(None, window, cx, |s| {
-                    s.move_with(|map, selection| {
-                        let start = selection.start.to_point(map);
-                        let end = selection.end.to_point(map);
-                        if end.column == 0 && end > start {
-                            let row = end.row.saturating_sub(1);
-                            selection.end =
-                                Point::new(row, map.buffer_snapshot.line_len(MultiBufferRow(row)))
-                                    .to_display_point(map);
-                        }
-                    });
-                });
-            }
-
             editor.selections.line_mode = line_mode;
             let kind = if line_mode {
                 MotionKind::Linewise
             } else {
                 MotionKind::Exclusive
             };
+            vim.adjust_visual_line_end(editor, window, cx);
             vim.yank_selections_content(editor, kind, window, cx);
             editor.change_selections(None, window, cx, |s| {
                 s.move_with(|map, selection| {
@@ -1166,6 +1175,28 @@ mod test {
                     ˇfox jumps over
                     the lazy dog"});
         cx.shared_clipboard().await.assert_eq("fox jumps over\n");
+    }
+
+    #[gpui::test]
+    async fn test_visual_line_other_end(cx: &mut gpui::TestAppContext) {
+        let mut cx = VimTestContext::new(cx, true).await;
+        cx.set_state(
+            indoc! {
+                "The quick brown
+                fox jˇumps over
+                the lazy dog"
+            },
+            Mode::Normal,
+        );
+        cx.simulate_keystrokes("shift-v $ o");
+        cx.assert_state(
+            indoc! {
+                "The quick brown
+                fox j«ˇumps over»
+                the lazy dog"
+            },
+            Mode::VisualLine,
+        );
     }
 
     #[gpui::test]
