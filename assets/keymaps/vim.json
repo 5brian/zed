@@ -687,9 +687,11 @@
   {
     "context": "BufferSearchBar || ProjectSearchBar",
     "bindings": {
+      "ctrl-^": "pane::AlternateFile",
       "ctrl-6": "pane::AlternateFile",
       "ctrl-o": "pane::GoBack",
-      "ctrl-i": "pane::GoForward"
+      "ctrl-i": "pane::GoForward",
+      "ctrl-c": "buffer_search::Dismiss"
     }
   },
   {
