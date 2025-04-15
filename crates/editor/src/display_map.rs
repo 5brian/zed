@@ -37,7 +37,7 @@ pub use block_map::{
 use block_map::{BlockRow, BlockSnapshot};
 use collections::{HashMap, HashSet};
 pub use crease_map::*;
-pub use fold_map::{Fold, FoldId, FoldPlaceholder, FoldPoint};
+pub use fold_map::{ChunkRenderer, ChunkRendererContext, Fold, FoldId, FoldPlaceholder, FoldPoint};
 use fold_map::{FoldMap, FoldSnapshot};
 use gpui::{App, Context, Entity, Font, HighlightStyle, LineLayout, Pixels, UnderlineStyle};
 pub use inlay_map::Inlay;
@@ -45,8 +45,7 @@ use inlay_map::{InlayMap, InlaySnapshot};
 pub use inlay_map::{InlayOffset, InlayPoint};
 pub use invisibles::{is_invisible, replacement};
 use language::{
-    ChunkRenderer, OffsetUtf16, Point, Subscription as BufferSubscription,
-    language_settings::language_settings,
+    OffsetUtf16, Point, Subscription as BufferSubscription, language_settings::language_settings,
 };
 use lsp::DiagnosticSeverity;
 use multi_buffer::{
@@ -256,7 +255,7 @@ impl DisplayMap {
                     BlockProperties {
                         placement: BlockPlacement::Replace(start..=end),
                         render,
-                        height,
+                        height: Some(height),
                         style,
                         priority,
                     }
@@ -319,6 +318,20 @@ impl DisplayMap {
             .update(cx, |map, cx| map.sync(snapshot, edits, cx));
         let mut block_map = self.block_map.write(snapshot, edits);
         block_map.remove_intersecting_replace_blocks(offset_ranges, inclusive);
+    }
+
+    pub fn disable_header_for_buffer(&mut self, buffer_id: BufferId, cx: &mut Context<Self>) {
+        let snapshot = self.buffer.read(cx).snapshot(cx);
+        let edits = self.buffer_subscription.consume().into_inner();
+        let tab_size = Self::tab_size(&self.buffer, cx);
+        let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
+        let (snapshot, edits) = self.fold_map.read(snapshot, edits);
+        let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
+        let (snapshot, edits) = self
+            .wrap_map
+            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+        let mut block_map = self.block_map.write(snapshot, edits);
+        block_map.disable_header_for_buffer(buffer_id)
     }
 
     pub fn fold_buffers(
@@ -499,6 +512,33 @@ impl DisplayMap {
     pub fn set_wrap_width(&self, width: Option<Pixels>, cx: &mut Context<Self>) -> bool {
         self.wrap_map
             .update(cx, |map, cx| map.set_wrap_width(width, cx))
+    }
+
+    pub fn update_fold_widths(
+        &mut self,
+        widths: impl IntoIterator<Item = (FoldId, Pixels)>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let snapshot = self.buffer.read(cx).snapshot(cx);
+        let edits = self.buffer_subscription.consume().into_inner();
+        let tab_size = Self::tab_size(&self.buffer, cx);
+        let (snapshot, edits) = self.inlay_map.sync(snapshot, edits);
+        let (mut fold_map, snapshot, edits) = self.fold_map.write(snapshot, edits);
+        let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
+        let (snapshot, edits) = self
+            .wrap_map
+            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+        self.block_map.read(snapshot, edits);
+
+        let (snapshot, edits) = fold_map.update_fold_widths(widths);
+        let widths_changed = !edits.is_empty();
+        let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
+        let (snapshot, edits) = self
+            .wrap_map
+            .update(cx, |map, cx| map.sync(snapshot, edits, cx));
+        self.block_map.read(snapshot, edits);
+
+        widths_changed
     }
 
     pub(crate) fn current_inlays(&self) -> impl Iterator<Item = &Inlay> {
@@ -1551,7 +1591,7 @@ pub mod tests {
                                     BlockProperties {
                                         placement,
                                         style: BlockStyle::Fixed,
-                                        height,
+                                        height: Some(height),
                                         render: Arc::new(|_| div().into_any()),
                                         priority,
                                     }
@@ -1702,7 +1742,6 @@ pub mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     #[gpui::test(retries = 5)]
     async fn test_soft_wraps(cx: &mut gpui::TestAppContext) {
         cx.background_executor
@@ -1720,7 +1759,7 @@ pub mod tests {
                 editor.update(cx, |editor, _cx| editor.text_layout_details(window));
 
             let font_size = px(12.0);
-            let wrap_width = Some(px(64.));
+            let wrap_width = Some(px(96.));
 
             let text = "one two three four five\nsix seven eight";
             let buffer = MultiBuffer::build_simple(text, cx);
@@ -1913,7 +1952,7 @@ pub mod tests {
                     placement: BlockPlacement::Above(
                         buffer_snapshot.anchor_before(Point::new(0, 0)),
                     ),
-                    height: 2,
+                    height: Some(2),
                     style: BlockStyle::Sticky,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
@@ -2108,7 +2147,7 @@ pub mod tests {
                         placement: BlockPlacement::Below(
                             buffer_snapshot.anchor_before(Point::new(1, 0)),
                         ),
-                        height: 1,
+                        height: Some(1),
                         style: BlockStyle::Sticky,
                         render: Arc::new(|_| div().into_any()),
                         priority: 0,
@@ -2117,7 +2156,7 @@ pub mod tests {
                         placement: BlockPlacement::Below(
                             buffer_snapshot.anchor_before(Point::new(2, 0)),
                         ),
-                        height: 0,
+                        height: None,
                         style: BlockStyle::Sticky,
                         render: Arc::new(|_| div().into_any()),
                         priority: 0,
@@ -2222,7 +2261,7 @@ pub mod tests {
                     placement: BlockPlacement::Below(
                         buffer_snapshot.anchor_before(Point::new(1, 0)),
                     ),
-                    height: 1,
+                    height: Some(1),
                     style: BlockStyle::Sticky,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
@@ -2296,7 +2335,7 @@ pub mod tests {
                         buffer_snapshot.anchor_before(Point::new(1, 2))
                             ..=buffer_snapshot.anchor_after(Point::new(2, 3)),
                     ),
-                    height: 4,
+                    height: Some(4),
                     style: BlockStyle::Fixed,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
@@ -2371,8 +2410,6 @@ pub mod tests {
         }
     }
 
-    // todo(linux) fails due to pixel differences in text rendering
-    #[cfg(target_os = "macos")]
     #[gpui::test]
     async fn test_chunks_with_soft_wrapping(cx: &mut gpui::TestAppContext) {
         cx.background_executor

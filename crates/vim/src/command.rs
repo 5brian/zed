@@ -92,7 +92,7 @@ impl VimOption {
 
                 CommandInterceptResult {
                     string: format!(
-                        "set {}",
+                        ":set {}",
                         options.iter().map(|opt| opt.to_string()).join(" ")
                     ),
                     action: VimSet { options }.boxed_clone(),
@@ -234,6 +234,7 @@ pub fn register(editor: &mut Editor, cx: &mut Context<Vim>) {
             return;
         };
         let count = Vim::take_count(cx).unwrap_or(1);
+        Vim::take_forced_motion(cx);
         let n = if count > 1 {
             format!(".,.+{}", count.saturating_sub(1))
         } else {
@@ -876,6 +877,7 @@ fn generate_commands(_: &App) -> Vec<VimCommand> {
         VimCommand::str(("Ch", "at"), "chat_panel::ToggleFocus"),
         VimCommand::str(("No", "tifications"), "notification_panel::ToggleFocus"),
         VimCommand::str(("A", "I"), "assistant::ToggleFocus"),
+        VimCommand::str(("G", "it"), "git_panel::ToggleFocus"),
         VimCommand::new(("noh", "lsearch"), search::buffer_search::Dismiss),
         VimCommand::new(("$", ""), EndOfDocument),
         VimCommand::new(("%", ""), EndOfDocument),
@@ -961,7 +963,15 @@ pub fn command_interceptor(mut input: &str, cx: &App) -> Vec<CommandInterceptRes
             .boxed_clone(),
         )
     } else if query.starts_with("se ") || query.starts_with("set ") {
-        return VimOption::possible_commands(query.split_once(" ").unwrap().1);
+        let (prefix, option) = query.split_once(' ').unwrap();
+        let mut commands = VimOption::possible_commands(option);
+        if !commands.is_empty() {
+            let query = prefix.to_string() + " " + option;
+            for command in &mut commands {
+                command.positions = generate_positions(&command.string, &query);
+            }
+        }
+        return commands;
     } else if query.starts_with('s') {
         let mut substitute = "substitute".chars().peekable();
         let mut query = query.chars().peekable();
@@ -1322,6 +1332,7 @@ impl Vim {
         &mut self,
         motion: Motion,
         times: Option<usize>,
+        forced_motion: bool,
         window: &mut Window,
         cx: &mut Context<Vim>,
     ) {
@@ -1334,7 +1345,13 @@ impl Vim {
             let start = editor.selections.newest_display(cx);
             let text_layout_details = editor.text_layout_details(window);
             let (mut range, _) = motion
-                .range(&snapshot, start.clone(), times, &text_layout_details)
+                .range(
+                    &snapshot,
+                    start.clone(),
+                    times,
+                    &text_layout_details,
+                    forced_motion,
+                )
                 .unwrap_or((start.range(), MotionKind::Exclusive));
             if range.start != start.start {
                 editor.change_selections(None, window, cx, |s| {

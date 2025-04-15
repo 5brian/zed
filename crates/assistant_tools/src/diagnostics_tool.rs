@@ -46,7 +46,7 @@ impl Tool for DiagnosticsTool {
         "diagnostics".into()
     }
 
-    fn needs_confirmation(&self) -> bool {
+    fn needs_confirmation(&self, _: &serde_json::Value, _: &App) -> bool {
         false
     }
 
@@ -55,10 +55,10 @@ impl Tool for DiagnosticsTool {
     }
 
     fn icon(&self) -> IconName {
-        IconName::Warning
+        IconName::XCircle
     }
 
-    fn input_schema(&self, format: LanguageModelToolSchemaFormat) -> serde_json::Value {
+    fn input_schema(&self, format: LanguageModelToolSchemaFormat) -> Result<serde_json::Value> {
         json_schema_for::<DiagnosticsToolInput>(format)
     }
 
