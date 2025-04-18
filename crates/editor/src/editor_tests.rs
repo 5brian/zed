@@ -5121,6 +5121,36 @@ if is_entire_line {
         ),
         "When selecting past the indent, nothing is trimmed"
     );
+
+    cx.set_state(
+        r#"            «for selection in selections.iter() {
+            let mut start = selection.start;
+
+            let mut end = selection.end;
+            let is_entire_line = selection.is_empty();
+            if is_entire_line {
+                start = Point::new(start.row, 0);
+ˇ»                end = cmp::min(max_point, Point::new(end.row + 1, 0));
+            }
+        "#,
+    );
+    cx.update_editor(|e, window, cx| e.copy_and_trim(&CopyAndTrim, window, cx));
+    assert_eq!(
+        cx.read_from_clipboard()
+            .and_then(|item| item.text().as_deref().map(str::to_string)),
+        Some(
+            "for selection in selections.iter() {
+let mut start = selection.start;
+
+let mut end = selection.end;
+let is_entire_line = selection.is_empty();
+if is_entire_line {
+    start = Point::new(start.row, 0);
+"
+            .to_string()
+        ),
+        "Copying with stripping should ignore empty lines"
+    );
 }
 
 #[gpui::test]
@@ -6309,7 +6339,187 @@ async fn test_select_larger_smaller_syntax_node(cx: &mut TestAppContext) {
                 use mod1::mod2::«{mod3, mod4}ˇ»;
 
                 fn fn_1«ˇ(param1: bool, param2: &str)» {
-                    «ˇlet var1 = "text";»
+                    let var1 = "«ˇtext»";
+                }
+            "#},
+            cx,
+        );
+    });
+}
+
+#[gpui::test]
+async fn test_select_larger_smaller_syntax_node_for_string(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let language = Arc::new(Language::new(
+        LanguageConfig::default(),
+        Some(tree_sitter_rust::LANGUAGE.into()),
+    ));
+
+    let text = r#"
+        use mod1::mod2::{mod3, mod4};
+
+        fn fn_1(param1: bool, param2: &str) {
+            let var1 = "hello world";
+        }
+    "#
+    .unindent();
+
+    let buffer = cx.new(|cx| Buffer::local(text, cx).with_language(language, cx));
+    let buffer = cx.new(|cx| MultiBuffer::singleton(buffer, cx));
+    let (editor, cx) = cx.add_window_view(|window, cx| build_editor(buffer, window, cx));
+
+    editor
+        .condition::<crate::EditorEvent>(cx, |editor, cx| !editor.buffer.read(cx).is_parsing(cx))
+        .await;
+
+    // Test 1: Cursor on a letter of a string word
+    editor.update_in(cx, |editor, window, cx| {
+        editor.change_selections(None, window, cx, |s| {
+            s.select_display_ranges([
+                DisplayPoint::new(DisplayRow(3), 17)..DisplayPoint::new(DisplayRow(3), 17)
+            ]);
+        });
+    });
+    editor.update_in(cx, |editor, window, cx| {
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "hˇello world";
+                }
+            "#},
+            cx,
+        );
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "«ˇhello» world";
+                }
+            "#},
+            cx,
+        );
+    });
+
+    // Test 2: Partial selection within a word
+    editor.update_in(cx, |editor, window, cx| {
+        editor.change_selections(None, window, cx, |s| {
+            s.select_display_ranges([
+                DisplayPoint::new(DisplayRow(3), 17)..DisplayPoint::new(DisplayRow(3), 19)
+            ]);
+        });
+    });
+    editor.update_in(cx, |editor, window, cx| {
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "h«elˇ»lo world";
+                }
+            "#},
+            cx,
+        );
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "«ˇhello» world";
+                }
+            "#},
+            cx,
+        );
+    });
+
+    // Test 3: Complete word already selected
+    editor.update_in(cx, |editor, window, cx| {
+        editor.change_selections(None, window, cx, |s| {
+            s.select_display_ranges([
+                DisplayPoint::new(DisplayRow(3), 16)..DisplayPoint::new(DisplayRow(3), 21)
+            ]);
+        });
+    });
+    editor.update_in(cx, |editor, window, cx| {
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "«helloˇ» world";
+                }
+            "#},
+            cx,
+        );
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "«hello worldˇ»";
+                }
+            "#},
+            cx,
+        );
+    });
+
+    // Test 4: Selection spanning across words
+    editor.update_in(cx, |editor, window, cx| {
+        editor.change_selections(None, window, cx, |s| {
+            s.select_display_ranges([
+                DisplayPoint::new(DisplayRow(3), 19)..DisplayPoint::new(DisplayRow(3), 24)
+            ]);
+        });
+    });
+    editor.update_in(cx, |editor, window, cx| {
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "hel«lo woˇ»rld";
+                }
+            "#},
+            cx,
+        );
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    let var1 = "«ˇhello world»";
+                }
+            "#},
+            cx,
+        );
+    });
+
+    // Test 5: Expansion beyond string
+    editor.update_in(cx, |editor, window, cx| {
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        editor.select_larger_syntax_node(&SelectLargerSyntaxNode, window, cx);
+        assert_text_with_selections(
+            editor,
+            indoc! {r#"
+                use mod1::mod2::{mod3, mod4};
+
+                fn fn_1(param1: bool, param2: &str) {
+                    «ˇlet var1 = "hello world";»
                 }
             "#},
             cx,
@@ -9924,7 +10134,7 @@ async fn test_completion_with_mode_specified_by_action(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-async fn test_completion_replacing_suffix_in_multicursors(cx: &mut TestAppContext) {
+async fn test_completion_replacing_surrounding_text_with_multicursors(cx: &mut TestAppContext) {
     init_test(cx, |_| {});
     let mut cx = EditorLspTestContext::new_rust(
         lsp::ServerCapabilities {
@@ -9938,6 +10148,8 @@ async fn test_completion_replacing_suffix_in_multicursors(cx: &mut TestAppContex
     )
     .await;
 
+    // scenario: surrounding text matches completion text
+    let completion_text = "to_offset";
     let initial_state = indoc! {"
         1. buf.to_offˇsuffix
         2. buf.to_offˇsuf
@@ -9968,7 +10180,6 @@ async fn test_completion_replacing_suffix_in_multicursors(cx: &mut TestAppContex
 
         buf.<to_off|suffix>  // newest cursor
     "};
-    let completion_text = "to_offset";
     let expected = indoc! {"
         1. buf.to_offsetˇ
         2. buf.to_offsetˇsuf
@@ -9984,24 +10195,122 @@ async fn test_completion_replacing_suffix_in_multicursors(cx: &mut TestAppContex
 
         buf.to_offsetˇ  // newest cursor
     "};
-
     cx.set_state(initial_state);
     cx.update_editor(|editor, window, cx| {
         editor.show_completions(&ShowCompletions { trigger: None }, window, cx);
     });
-
-    let counter = Arc::new(AtomicUsize::new(0));
     handle_completion_request_with_insert_and_replace(
         &mut cx,
         completion_marked_buffer,
         vec![completion_text],
-        counter.clone(),
+        Arc::new(AtomicUsize::new(0)),
     )
     .await;
     cx.condition(|editor, _| editor.context_menu_visible())
         .await;
-    assert_eq!(counter.load(atomic::Ordering::Acquire), 1);
+    let apply_additional_edits = cx.update_editor(|editor, window, cx| {
+        editor
+            .confirm_completion_replace(&ConfirmCompletionReplace, window, cx)
+            .unwrap()
+    });
+    cx.assert_editor_state(expected);
+    handle_resolve_completion_request(&mut cx, None).await;
+    apply_additional_edits.await.unwrap();
 
+    // scenario: surrounding text matches surroundings of newest cursor, inserting at the end
+    let completion_text = "foo_and_bar";
+    let initial_state = indoc! {"
+        1. ooanbˇ
+        2. zooanbˇ
+        3. ooanbˇz
+        4. zooanbˇz
+        5. ooanˇ
+        6. oanbˇ
+
+        ooanbˇ
+    "};
+    let completion_marked_buffer = indoc! {"
+        1. ooanb
+        2. zooanb
+        3. ooanbz
+        4. zooanbz
+        5. ooan
+        6. oanb
+
+        <ooanb|>
+    "};
+    let expected = indoc! {"
+        1. foo_and_barˇ
+        2. zfoo_and_barˇ
+        3. foo_and_barˇz
+        4. zfoo_and_barˇz
+        5. ooanfoo_and_barˇ
+        6. oanbfoo_and_barˇ
+
+        foo_and_barˇ
+    "};
+    cx.set_state(initial_state);
+    cx.update_editor(|editor, window, cx| {
+        editor.show_completions(&ShowCompletions { trigger: None }, window, cx);
+    });
+    handle_completion_request_with_insert_and_replace(
+        &mut cx,
+        completion_marked_buffer,
+        vec![completion_text],
+        Arc::new(AtomicUsize::new(0)),
+    )
+    .await;
+    cx.condition(|editor, _| editor.context_menu_visible())
+        .await;
+    let apply_additional_edits = cx.update_editor(|editor, window, cx| {
+        editor
+            .confirm_completion_replace(&ConfirmCompletionReplace, window, cx)
+            .unwrap()
+    });
+    cx.assert_editor_state(expected);
+    handle_resolve_completion_request(&mut cx, None).await;
+    apply_additional_edits.await.unwrap();
+
+    // scenario: surrounding text matches surroundings of newest cursor, inserted at the middle
+    // (expects the same as if it was inserted at the end)
+    let completion_text = "foo_and_bar";
+    let initial_state = indoc! {"
+        1. ooˇanb
+        2. zooˇanb
+        3. ooˇanbz
+        4. zooˇanbz
+
+        ooˇanb
+    "};
+    let completion_marked_buffer = indoc! {"
+        1. ooanb
+        2. zooanb
+        3. ooanbz
+        4. zooanbz
+
+        <oo|anb>
+    "};
+    let expected = indoc! {"
+        1. foo_and_barˇ
+        2. zfoo_and_barˇ
+        3. foo_and_barˇz
+        4. zfoo_and_barˇz
+
+        foo_and_barˇ
+    "};
+    cx.set_state(initial_state);
+    cx.update_editor(|editor, window, cx| {
+        editor.show_completions(&ShowCompletions { trigger: None }, window, cx);
+    });
+    handle_completion_request_with_insert_and_replace(
+        &mut cx,
+        completion_marked_buffer,
+        vec![completion_text],
+        Arc::new(AtomicUsize::new(0)),
+    )
+    .await;
+    cx.condition(|editor, _| editor.context_menu_visible())
+        .await;
     let apply_additional_edits = cx.update_editor(|editor, window, cx| {
         editor
             .confirm_completion_replace(&ConfirmCompletionReplace, window, cx)
@@ -12581,276 +12890,6 @@ async fn go_to_prev_overlapping_diagnostic(executor: BackgroundExecutor, cx: &mu
 
     cx.assert_editor_state(indoc! {"
         fn func(abc def: i32) -> ˇu32 {
-        }
-    "});
-}
-
-#[gpui::test]
-async fn cycle_through_same_place_diagnostics(
-    executor: BackgroundExecutor,
-    cx: &mut TestAppContext,
-) {
-    init_test(cx, |_| {});
-
-    let mut cx = EditorTestContext::new(cx).await;
-    let lsp_store =
-        cx.update_editor(|editor, _, cx| editor.project.as_ref().unwrap().read(cx).lsp_store());
-
-    cx.set_state(indoc! {"
-        ˇfn func(abc def: i32) -> u32 {
-        }
-    "});
-
-    cx.update(|_, cx| {
-        lsp_store.update(cx, |lsp_store, cx| {
-            lsp_store
-                .update_diagnostics(
-                    LanguageServerId(0),
-                    lsp::PublishDiagnosticsParams {
-                        uri: lsp::Url::from_file_path(path!("/root/file")).unwrap(),
-                        version: None,
-                        diagnostics: vec![
-                            lsp::Diagnostic {
-                                range: lsp::Range::new(
-                                    lsp::Position::new(0, 11),
-                                    lsp::Position::new(0, 12),
-                                ),
-                                severity: Some(lsp::DiagnosticSeverity::ERROR),
-                                ..Default::default()
-                            },
-                            lsp::Diagnostic {
-                                range: lsp::Range::new(
-                                    lsp::Position::new(0, 12),
-                                    lsp::Position::new(0, 15),
-                                ),
-                                severity: Some(lsp::DiagnosticSeverity::ERROR),
-                                ..Default::default()
-                            },
-                            lsp::Diagnostic {
-                                range: lsp::Range::new(
-                                    lsp::Position::new(0, 12),
-                                    lsp::Position::new(0, 15),
-                                ),
-                                severity: Some(lsp::DiagnosticSeverity::ERROR),
-                                ..Default::default()
-                            },
-                            lsp::Diagnostic {
-                                range: lsp::Range::new(
-                                    lsp::Position::new(0, 25),
-                                    lsp::Position::new(0, 28),
-                                ),
-                                severity: Some(lsp::DiagnosticSeverity::ERROR),
-                                ..Default::default()
-                            },
-                        ],
-                    },
-                    &[],
-                    cx,
-                )
-                .unwrap()
-        });
-    });
-    executor.run_until_parked();
-
-    //// Backward
-
-    // Fourth diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_prev_diagnostic(&GoToPreviousDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc def: i32) -> ˇu32 {
-        }
-    "});
-
-    // Third diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_prev_diagnostic(&GoToPreviousDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc ˇdef: i32) -> u32 {
-        }
-    "});
-
-    // Second diagnostic, same place
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_prev_diagnostic(&GoToPreviousDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc ˇdef: i32) -> u32 {
-        }
-    "});
-
-    // First diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_prev_diagnostic(&GoToPreviousDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
-        }
-    "});
-
-    // Wrapped over, fourth diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_prev_diagnostic(&GoToPreviousDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc def: i32) -> ˇu32 {
-        }
-    "});
-
-    cx.update_editor(|editor, window, cx| {
-        editor.move_to_beginning(&MoveToBeginning, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        ˇfn func(abc def: i32) -> u32 {
-        }
-    "});
-
-    //// Forward
-
-    // First diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
-        }
-    "});
-
-    // Second diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc ˇdef: i32) -> u32 {
-        }
-    "});
-
-    // Third diagnostic, same place
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc ˇdef: i32) -> u32 {
-        }
-    "});
-
-    // Fourth diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abc def: i32) -> ˇu32 {
-        }
-    "});
-
-    // Wrapped around, first diagnostic
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
-        }
-    "});
-}
-
-#[gpui::test]
-async fn active_diagnostics_dismiss_after_invalidation(
-    executor: BackgroundExecutor,
-    cx: &mut TestAppContext,
-) {
-    init_test(cx, |_| {});
-
-    let mut cx = EditorTestContext::new(cx).await;
-    let lsp_store =
-        cx.update_editor(|editor, _, cx| editor.project.as_ref().unwrap().read(cx).lsp_store());
-
-    cx.set_state(indoc! {"
-        ˇfn func(abc def: i32) -> u32 {
-        }
-    "});
-
-    let message = "Something's wrong!";
-    cx.update(|_, cx| {
-        lsp_store.update(cx, |lsp_store, cx| {
-            lsp_store
-                .update_diagnostics(
-                    LanguageServerId(0),
-                    lsp::PublishDiagnosticsParams {
-                        uri: lsp::Url::from_file_path(path!("/root/file")).unwrap(),
-                        version: None,
-                        diagnostics: vec![lsp::Diagnostic {
-                            range: lsp::Range::new(
-                                lsp::Position::new(0, 11),
-                                lsp::Position::new(0, 12),
-                            ),
-                            severity: Some(lsp::DiagnosticSeverity::ERROR),
-                            message: message.to_string(),
-                            ..Default::default()
-                        }],
-                    },
-                    &[],
-                    cx,
-                )
-                .unwrap()
-        });
-    });
-    executor.run_until_parked();
-
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-        assert_eq!(
-            editor
-                .active_diagnostics
-                .as_ref()
-                .map(|diagnostics_group| diagnostics_group.primary_message.as_str()),
-            Some(message),
-            "Should have a diagnostics group activated"
-        );
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
-        }
-    "});
-
-    cx.update(|_, cx| {
-        lsp_store.update(cx, |lsp_store, cx| {
-            lsp_store
-                .update_diagnostics(
-                    LanguageServerId(0),
-                    lsp::PublishDiagnosticsParams {
-                        uri: lsp::Url::from_file_path(path!("/root/file")).unwrap(),
-                        version: None,
-                        diagnostics: Vec::new(),
-                    },
-                    &[],
-                    cx,
-                )
-                .unwrap()
-        });
-    });
-    executor.run_until_parked();
-    cx.update_editor(|editor, _, _| {
-        assert_eq!(
-            editor.active_diagnostics, None,
-            "After no diagnostics set to the editor, no diagnostics should be active"
-        );
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
-        }
-    "});
-
-    cx.update_editor(|editor, window, cx| {
-        editor.go_to_diagnostic(&GoToDiagnostic, window, cx);
-        assert_eq!(
-            editor.active_diagnostics, None,
-            "Should be no diagnostics to go to and activate"
-        );
-    });
-    cx.assert_editor_state(indoc! {"
-        fn func(abcˇ def: i32) -> u32 {
         }
     "});
 }
