@@ -160,9 +160,11 @@ impl Vim {
     pub fn exchange_visual(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stop_recording(cx);
         self.update_editor(window, cx, |vim, editor, window, cx| {
-            let selection = editor.selections.newest_anchor();
-            let new_range = selection.start..selection.end;
+            let selection = editor.selections.newest_adjusted(cx);
             let snapshot = editor.snapshot(window, cx);
+            let start = snapshot.buffer_snapshot.anchor_before(selection.start);
+            let end = snapshot.buffer_snapshot.anchor_before(selection.end);
+            let new_range = start..end;
             vim.exchange_impl(new_range, editor, &snapshot, window, cx);
         });
         self.switch_mode(Mode::Normal, false, window, cx);
