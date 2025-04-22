@@ -3042,6 +3042,7 @@ dependencies = [
  "strum 0.27.1",
  "subtle",
  "supermaven_api",
+ "task",
  "telemetry_events",
  "text",
  "theme",
@@ -4189,6 +4190,7 @@ dependencies = [
  "command_palette_hooks",
  "dap",
  "db",
+ "debugger_tools",
  "editor",
  "env_logger 0.11.8",
  "feature_flags",
@@ -4198,6 +4200,7 @@ dependencies = [
  "language",
  "log",
  "menu",
+ "parking_lot",
  "picker",
  "pretty_assertions",
  "project",
@@ -4912,6 +4915,7 @@ dependencies = [
  "language_models",
  "languages",
  "node_runtime",
+ "parking_lot",
  "paths",
  "project",
  "prompt_store",
@@ -4920,6 +4924,7 @@ dependencies = [
  "serde",
  "settings",
  "shellexpand 2.1.2",
+ "smol",
  "telemetry",
  "toml 0.8.20",
  "unindent",
@@ -7713,6 +7718,7 @@ dependencies = [
  "mistral",
  "ollama",
  "open_ai",
+ "partial-json-fixer",
  "project",
  "proto",
  "schemars",
@@ -9827,6 +9833,12 @@ dependencies = [
  "smallvec",
  "windows-targets 0.52.6",
 ]
+
+[[package]]
+name = "partial-json-fixer"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35ffd90b3f3b6477db7478016b9efb1b7e9d38eafd095f0542fe0ec2ea884a13"
 
 [[package]]
 name = "password-hash"
@@ -14219,6 +14231,7 @@ dependencies = [
  "gpui",
  "hex",
  "parking_lot",
+ "pretty_assertions",
  "proto",
  "schemars",
  "serde",
